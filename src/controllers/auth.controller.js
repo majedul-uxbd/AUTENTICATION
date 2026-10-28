@@ -1,55 +1,50 @@
-import { db } from "../db/index.js";
-import { users } from "../db/schema.js";
-import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { z } from "zod";
+const { db } = require("../db/index.js");
+const { users } = require("../db/schema.js");
+const { eq } = require("drizzle-orm");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const Joi = require("joi");
+const { setServerResponse } = require("../utilities/set-server-response.js");
 
-const registerSchema = z.object({
-    full_name: z
-        .string({ message: "Name is required" })
-        .trim()
-        .min(3, "Name must be at least 3 characters long"),
-    email: z
-        .string({ message: "Email is required" })
-        .email("Invalid email address format"),
-    role: z
-        .enum(["admin", "user"], {
-            message: "Role must be either 'admin' or 'user'",
-        })
-        .default("user"),
-    password: z
-        .string({ message: "Password is required" })
-        .min(8, "Password must be at least 8 characters long"),
+const registerSchema = Joi.object({
+    full_name: Joi.string().trim().min(3).required().messages({ "any.required": "Name is required", "string.empty": "Name is required", "string.min": "Name must be at least 3 characters long" }),
+    email: Joi.string().trim().email().required().messages({ "any.required": "Email is required", "string.empty": "Email is required", "string.email": "Invalid email address format" }),
+    role: Joi.string().valid("admin", "user").default("user").messages({ "any.only": "Role must be either 'admin' or 'user'" }),
+    password: Joi.string().min(8).required().messages({ "any.required": "Password is required", "string.empty": "Password is required", "string.min": "Password must be at least 8 characters long" }),
 });
 
-const loginSchema = z.object({
-    email: z
-        .string({ message: "Email is required" })
-        .email("Invalid email address format"),
-    password: z
-        .string({ message: "Password is required" })
-        .min(1, "Password is required"),
+const loginSchema = Joi.object({
+    email: Joi.string().trim().email().required().messages({ "any.required": "Email is required", "string.empty": "Email is required", "string.email": "Invalid email address format" }),
+    password: Joi.string().min(1).required().messages({ "any.required": "Password is required", "string.empty": "Password is required" }),
 });
+
+const validationMessageKey = (detail) => {
+    const field = detail.path[0];
+    if (field === "full_name") return detail.type === "string.min" ? "name_min" : "name_required";
+    if (field === "email") return detail.type === "string.email" ? "email_invalid" : "email_required";
+    if (field === "role") return "role_invalid";
+    if (field === "password") return detail.type === "string.min" && detail.context?.limit === 8 ? "password_min" : "password_required";
+    return "validation_failed";
+};
+
+const validationErrors = (error, language) => error.details.map((detail) => ({
+    field: detail.path.join("."),
+    message: setServerResponse(400, validationMessageKey(detail), language).message,
+}));
 
 // REGISTER
-export const register = async (req, res) => {
+const register = async (req, res) => {
     try {
-        const result = registerSchema.safeParse(req.body);
+        const language = req.body.lg || "jp";
+        const { error, value } = registerSchema.validate(req.body, { abortEarly: false });
 
-        if (!result.success) {
-            const errors = result.error.issues.map((issue) => ({
-                field: issue.path.join("."),
-                message: issue.message,
-            }));
+        if (error) {
+            const errors = validationErrors(error, language);
 
-            return res.status(400).json({
-                message: errors[0]?.message || "Validation failed",
-                errors,
-            });
+            return res.status(400).json(setServerResponse(400, "validation_failed", language, { errors }));
         }
 
-        const { full_name, email, password, role } = result.data;
+        const { full_name, email, password, role } = value;
         const normalizedEmail = email.toLowerCase();
 
         const existingUser = await db
@@ -59,9 +54,7 @@ export const register = async (req, res) => {
             .limit(1);
 
         if (existingUser.length > 0) {
-            return res.status(409).json({
-                message: "Email already registered",
-            });
+            return res.status(409).json(setServerResponse(409, "email_exists", language));
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
@@ -81,42 +74,30 @@ export const register = async (req, res) => {
                 role: users.role,
             });
 
-        return res.status(201).json({
-            message: "User registered successfully",
-            user: newUser,
-        });
+        return res.status(201).json(setServerResponse(201, "register_success", language, { user: newUser }));
     } catch (error) {
         if (error.code === "23505") {
-            return res.status(409).json({
-                message: "Email already registered",
-            });
+            return res.status(409).json(setServerResponse(409, "email_exists", language));
         }
 
         console.error(error);
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        return res.status(500).json(setServerResponse(500, "internal_error", language));
     }
 };
 
 // LOGIN
-export const login = async (req, res) => {
+const login = async (req, res) => {
     try {
-        const result = loginSchema.safeParse(req.body);
+        const language = req.body.lg || "jp";
+        const { error, value } = loginSchema.validate(req.body, { abortEarly: false });
 
-        if (!result.success) {
-            const errors = result.error.issues.map((issue) => ({
-                field: issue.path.join("."),
-                message: issue.message,
-            }));
+        if (error) {
+            const errors = validationErrors(error, language);
 
-            return res.status(400).json({
-                message: errors[0]?.message || "Validation failed",
-                errors,
-            });
+            return res.status(400).json(setServerResponse(400, "validation_failed", language, { errors }));
         }
 
-        const { email, password } = result.data;
+        const { email, password } = value;
 
         const [user] = await db
             .select()
@@ -125,9 +106,7 @@ export const login = async (req, res) => {
             .limit(1);
 
         if (!user) {
-            return res.status(401).json({
-                message: "Invalid credentials",
-            });
+            return res.status(401).json(setServerResponse(401, "invalid_credentials", language));
         }
 
         const isMatch = await bcrypt.compare(
@@ -136,9 +115,7 @@ export const login = async (req, res) => {
         );
 
         if (!isMatch) {
-            return res.status(401).json({
-                message: "Invalid credentials",
-            });
+            return res.status(401).json(setServerResponse(401, "invalid_credentials", language));
         }
 
         const token = jwt.sign(
@@ -147,14 +124,11 @@ export const login = async (req, res) => {
             { expiresIn: "1h" }
         );
 
-        return res.status(200).json({
-            message: "Login successful",
-            token,
-        });
+        return res.status(200).json(setServerResponse(200, "login_success", language, { token }));
     } catch (error) {
         console.error(error);
-        return res.status(500).json({
-            message: "Internal server error",
-        });
+        return res.status(500).json(setServerResponse(500, "internal_error", language));
     }
 };
+
+module.exports = { register, login };

@@ -1,12 +1,12 @@
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken");
+const { setServerResponse } = require("../utilities/set-server-response.js");
 
-export const authMiddleware = (req, res, next) => {
+const authMiddleware = (req, res, next) => {
     const authHeader = req.headers.authorization;
+    const language = req.body.lg || "jp";
 
     if (!authHeader?.startsWith("Bearer ")) {
-        return res.status(401).json({
-            message: "Access denied. No token provided.",
-        });
+        return res.status(401).json(setServerResponse(401, "access_denied", language));
     }
 
     const token = authHeader.split(" ")[1];
@@ -21,8 +21,8 @@ export const authMiddleware = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (error) {
-        return res.status(401).json({
-            message: "Invalid or expired token",
-        });
+        return res.status(401).json(setServerResponse(401, "invalid_token", language));
     }
 };
+
+module.exports = { authMiddleware };

@@ -8,6 +8,13 @@
       "when": 1793164575899,
       "tag": "0000_smooth_invisible_woman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793167993769,
+      "tag": "0001_complete_stryfe",
+      "breakpoints": true
     }
   ]
 }
