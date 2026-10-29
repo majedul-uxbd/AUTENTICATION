@@ -4,7 +4,6 @@ const { eq } = require("drizzle-orm");
 const jwt = require("jsonwebtoken");
 const Joi = require("joi");
 const argon2 = require("argon2");
-const { setServerResponse } = require("../utilities/set-server-response.js");
 const { API_STATUS_CODE } = require("../consts/error-status.js");
 
 

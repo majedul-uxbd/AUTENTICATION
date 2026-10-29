@@ -13,6 +13,7 @@ const getUser = async (req, res) => {
                 email: users.email,
                 role: users.role,
                 createdAt: users.createdAt,
+                updatedAt: users.updatedAt,
             })
             .from(users)
             .where(eq(users.id, req.user.userId))

@@ -4,6 +4,13 @@ const { API_STATUS_CODE } = require("../consts/error-status.js");
 const { db } = require("../db/index.js");
 const { users } = require("../db/schema.js");
 
+/**
+ * 
+ * @description This middleware function is used to authenticate a user based on a JWT token
+ * provided in the Authorization header of the request. It verifies the token, 
+ * checks if the user exists in the database, and attaches the user ID to the request object for further processing.
+ * @returns 
+ */
 const authenticateToken = async (req, res, next) => {
     const authorization = req.get("authorization");
     const match = authorization?.match(/^Bearer\s+(\S+)$/i);
