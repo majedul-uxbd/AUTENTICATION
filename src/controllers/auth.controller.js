@@ -1,55 +1,66 @@
-import { db } from "../db/index.js";
-import { users } from "../db/schema.js";
-import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { z } from "zod";
+const { db } = require("../db/index.js");
+const { users } = require("../db/schema.js");
+const { eq } = require("drizzle-orm");
+const jwt = require("jsonwebtoken");
+const Joi = require("joi");
+const argon2 = require("argon2");
+const { setServerResponse } = require("../utilities/set-server-response.js");
+const { API_STATUS_CODE } = require("../consts/error-status.js");
 
-const registerSchema = z.object({
-    full_name: z
-        .string({ message: "Name is required" })
+
+const registerSchema = Joi.object({
+    full_name: Joi.string()
         .trim()
-        .min(3, "Name must be at least 3 characters long"),
-    email: z
-        .string({ message: "Email is required" })
-        .email("Invalid email address format"),
-    role: z
-        .enum(["admin", "user"], {
-            message: "Role must be either 'admin' or 'user'",
-        })
-        .default("user"),
-    password: z
-        .string({ message: "Password is required" })
-        .min(8, "Password must be at least 8 characters long"),
+        .min(3)
+        .max(100)
+        .required(),
+    email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
+    role: Joi.string()
+        .valid("admin", "user")
+        .default("user")
+        .messages({
+            "any.only": "Role must be either 'admin' or 'user'",
+        }),
+    password: Joi.string()
+        .min(6)
+        .required()
 });
 
-const loginSchema = z.object({
-    email: z
-        .string({ message: "Email is required" })
-        .email("Invalid email address format"),
-    password: z
-        .string({ message: "Password is required" })
-        .min(1, "Password is required"),
+const loginSchema = Joi.object({
+    email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
+    password: Joi.string()
+        .min(6)
+        .required(),
 });
 
-// REGISTER
-export const register = async (req, res) => {
+/**
+ * 
+ * @description This function is used to register a new user. It validates the request body, 
+ * checks for existing users, hashes the password, and inserts the new user into the database.
+ * @returns 
+ */
+const register = async (req, res) => {
     try {
-        const result = registerSchema.safeParse(req.body);
+        const { error, value } = registerSchema.validate(req.body, {
+            abortEarly: false,
+        });
 
-        if (!result.success) {
-            const errors = result.error.issues.map((issue) => ({
-                field: issue.path.join("."),
-                message: issue.message,
+        if (error) {
+            const errors = error.details.map((detail) => ({
+                field: detail.path.join("."),
+                message: detail.message,
             }));
-
-            return res.status(400).json({
-                message: errors[0]?.message || "Validation failed",
-                errors,
-            });
+            return res.status(API_STATUS_CODE.BAD_REQUEST).send({
+                status: "failed",
+                message: errors[0]?.message
+            })
         }
 
-        const { full_name, email, password, role } = result.data;
+        const { full_name, email, password, role } = value;
         const normalizedEmail = email.toLowerCase();
 
         const existingUser = await db
@@ -59,12 +70,13 @@ export const register = async (req, res) => {
             .limit(1);
 
         if (existingUser.length > 0) {
-            return res.status(409).json({
+            return res.status(API_STATUS_CODE.CONFLICT).send({
+                status: "failed",
                 message: "Email already registered",
             });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 12);
+        const hashedPassword = await argon2.hash(password);
 
         const [newUser] = await db
             .insert(users)
@@ -81,42 +93,39 @@ export const register = async (req, res) => {
                 role: users.role,
             });
 
-        return res.status(201).json({
-            message: "User registered successfully",
-            user: newUser,
+        return res.status(API_STATUS_CODE.CREATED).send({
+            status: "success",
+            message: "User registered successfully"
         });
     } catch (error) {
-        if (error.code === "23505") {
-            return res.status(409).json({
-                message: "Email already registered",
-            });
-        }
-
         console.error(error);
-        return res.status(500).json({
+        return res.status(API_STATUS_CODE.INTERNAL_SERVER_ERROR).send({
+            status: "failed",
             message: "Internal server error",
         });
     }
 };
 
 // LOGIN
-export const login = async (req, res) => {
+const login = async (req, res) => {
     try {
-        const result = loginSchema.safeParse(req.body);
+        const { error, value } = loginSchema.validate(req.body, {
+            abortEarly: false,
+        });
 
-        if (!result.success) {
-            const errors = result.error.issues.map((issue) => ({
-                field: issue.path.join("."),
-                message: issue.message,
+        if (error) {
+            const errors = error.details.map((detail) => ({
+                field: detail.path.join("."),
+                message: detail.message,
             }));
 
-            return res.status(400).json({
-                message: errors[0]?.message || "Validation failed",
-                errors,
+            return res.status(API_STATUS_CODE.BAD_REQUEST).send({
+                status: "failed",
+                message: errors[0]?.message
             });
         }
 
-        const { email, password } = result.data;
+        const { email, password } = value;
 
         const [user] = await db
             .select()
@@ -125,18 +134,20 @@ export const login = async (req, res) => {
             .limit(1);
 
         if (!user) {
-            return res.status(401).json({
+            return res.status(API_STATUS_CODE.UNAUTHORIZED).send({
+                status: "failed",
                 message: "Invalid credentials",
             });
         }
 
-        const isMatch = await bcrypt.compare(
-            password,
-            user.password
+        const isMatch = await argon2.verify(
+            user.password,
+            password
         );
 
         if (!isMatch) {
-            return res.status(401).json({
+            return res.status(API_STATUS_CODE.UNAUTHORIZED).send({
+                status: "failed",
                 message: "Invalid credentials",
             });
         }
@@ -147,14 +158,21 @@ export const login = async (req, res) => {
             { expiresIn: "1h" }
         );
 
-        return res.status(200).json({
-            message: "Login successful",
+        return res.status(API_STATUS_CODE.OK).send({
+            status: "success",
+            message: "Login successfully",
             token,
         });
     } catch (error) {
         console.error(error);
-        return res.status(500).json({
+        return res.status(API_STATUS_CODE.INTERNAL_SERVER_ERROR).send({
+            status: "failed",
             message: "Internal server error",
         });
     }
+};
+
+module.exports = {
+    register,
+    login,
 };

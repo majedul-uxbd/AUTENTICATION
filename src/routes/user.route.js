@@ -1,14 +1,17 @@
-import { Router } from "express";
-import {
+const express = require("express");
+const { Router } = express;
+const {
     getUser,
     deleteUser,
-} from "../controllers/user.controller.js";
+} = require("../controllers/user.controller.js");
 
-import { authMiddleware } from "../middleware/auth.middleware.js";
+const { authenticateToken } = require("../middleware/jwt.js");
 
-const router = Router();
+const userRoutes = Router();
 
-router.get("/me", authMiddleware, getUser);
-router.delete("/me", authMiddleware, deleteUser);
+userRoutes.get("/me", authenticateToken, getUser);
+userRoutes.delete("/me", authenticateToken, deleteUser);
 
-export default router;
+module.exports = {
+    userRoutes
+};
