@@ -16,6 +16,9 @@ const users = pgTable("users", {
 
     password: varchar("password", { length: 255 })
         .notNull(),
+    lastLoginDatetime: timestamp("last_login_datetime"),
+
+    imageUrl: varchar("image_url", { length: 255 }),
 
     createdAt: timestamp("created_at")
         .defaultNow()
